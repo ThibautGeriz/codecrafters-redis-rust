@@ -36,6 +36,12 @@ async fn handle_connection(stream: &mut TcpStream) -> std::result::Result<(), Er
                     .write_all(format!("+{}\r\n", print).as_bytes())
                     .await?;
             }
+            Ok(Command::Get { key: _ }) => {
+                stream.write_all(b"-not yet implemented\r\n").await?;
+            }
+            Ok(Command::Set { key: _, value: _ }) => {
+                stream.write_all(b"-not yet implemented\r\n").await?;
+            }
             Ok(Command::Unknown) => {
                 stream.write_all(b"-Unknown command\r\n").await?;
             }

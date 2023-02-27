@@ -10,6 +10,8 @@ use crate::parser::Value;
 pub enum Command {
     Ping,
     Echo { print: String },
+    Get { key: String },
+    Set { key: String, value: String },
     Unknown,
 }
 
@@ -46,6 +48,27 @@ pub fn get_command(buffer: &[u8]) -> Result<Command, ParsingError> {
                     }
                     _ => return Err(ParsingError::FormatError),
                 }
+            } else if value == &String::from("get") {
+                match parsed_lines.get(1) {
+                    Some(Value::String { value }) => {
+                        return Ok(Command::Get {
+                            key: String::from(value),
+                        });
+                    }
+                    _ => return Err(ParsingError::FormatError),
+                }
+            } else if value == &String::from("set") {
+                match (parsed_lines.get(1), parsed_lines.get(2)) {
+                    (Some(Value::String { value: key }), Some(Value::String { value })) => {
+                        return Ok(Command::Set {
+                            key: String::from(key),
+                            value: String::from(value),
+                        });
+                    }
+                    _ => {
+                        return Err(ParsingError::FormatError);
+                    }
+                }
             }
             Ok(Command::Unknown)
         }
@@ -55,8 +78,6 @@ pub fn get_command(buffer: &[u8]) -> Result<Command, ParsingError> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Cursor, Seek};
-
     use crate::command::{get_command, Command};
     #[test]
     fn parse_input_return_unknown_if_empty() {
@@ -81,6 +102,33 @@ mod tests {
             result.unwrap(),
             Command::Echo {
                 print: String::from("tititoto")
+            }
+        );
+    }
+
+    #[test]
+    fn parse_input_return_get() {
+        let input = "*2\r\n$3\r\nget\r\n$8\r\ntititoto\r\n".as_bytes();
+        let result = get_command(input);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.unwrap(),
+            Command::Get {
+                key: String::from("tititoto")
+            }
+        );
+    }
+
+    #[test]
+    fn parse_input_return_set() {
+        let input = "*3\r\n$3\r\nset\r\n$4\r\ntiti\r\n$4\r\ntoto\r\n".as_bytes();
+        let result = get_command(input);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.unwrap(),
+            Command::Set {
+                key: String::from("titi"),
+                value: String::from("toto")
             }
         );
     }
