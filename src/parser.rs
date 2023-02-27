@@ -1,6 +1,7 @@
 use std::io::Cursor;
 use std::io::Seek;
 use std::str::from_utf8;
+use thiserror::Error;
 
 #[derive(Debug, PartialEq)]
 pub enum Value {
@@ -10,75 +11,86 @@ pub enum Value {
     Null,
 }
 
-pub fn parse(buffer: &[u8], cursor: &mut Cursor<&[u8]>) -> Option<Value> {
+#[derive(Error, Debug)]
+pub enum ParsingError {
+    #[error("Io Error")]
+    IOError(#[from] std::io::Error),
+    #[error("UTF8 Error")]
+    Utf8Error(#[from] std::str::Utf8Error),
+    #[error("Number Error")]
+    NumberError,
+    #[error("Format Error")]
+    FormatError,
+}
+
+pub fn parse(buffer: &[u8], cursor: &mut Cursor<&[u8]>) -> Result<Value, ParsingError> {
     match buffer[cursor.position() as usize] {
         b':' => {
-            cursor.seek(std::io::SeekFrom::Current(1)).unwrap();
+            cursor.seek(std::io::SeekFrom::Current(1))?;
             parse_int(buffer, cursor)
         }
         b'$' => {
-            cursor.seek(std::io::SeekFrom::Current(1)).unwrap();
+            cursor.seek(std::io::SeekFrom::Current(1))?;
             parse_bulk_string(buffer, cursor)
         }
         b'*' => {
-            cursor.seek(std::io::SeekFrom::Current(1)).unwrap();
+            cursor.seek(std::io::SeekFrom::Current(1))?;
             parse_array(buffer, cursor)
         }
-        _ => None,
+        _ => Err(ParsingError::FormatError),
     }
 }
 
-pub fn parse_int(buffer: &[u8], cursor: &mut Cursor<&[u8]>) -> Option<Value> {
+pub fn parse_int(buffer: &[u8], cursor: &mut Cursor<&[u8]>) -> Result<Value, ParsingError> {
     let mut step: u64 = 1;
     let position = cursor.position() as usize;
     while buffer[position + step as usize + 1] != b'\n' {
         step += 1;
     }
     let int_slice = &buffer[position..position + step as usize];
-    let value = from_utf8(int_slice)
-        .ok()
-        .and_then(|s| s.parse::<i32>().ok());
-    cursor
-        .seek(std::io::SeekFrom::Current((step as i64) + 2))
-        .unwrap();
-    value.map(|v| Value::Int { value: v })
+    let number_as_str = from_utf8(int_slice)?;
+
+    let number = number_as_str
+        .parse::<i32>()
+        .map_err(|_| ParsingError::NumberError)?;
+    cursor.seek(std::io::SeekFrom::Current((step as i64) + 2))?;
+    Ok(Value::Int { value: number })
 }
 
-fn parse_bulk_string(buffer: &[u8], cursor: &mut Cursor<&[u8]>) -> Option<Value> {
-    match parse_int(buffer, cursor) {
-        Some(Value::Int { value }) => {
+fn parse_bulk_string(buffer: &[u8], cursor: &mut Cursor<&[u8]>) -> Result<Value, ParsingError> {
+    let string_length = parse_int(buffer, cursor)?;
+    match string_length {
+        Value::Int { value } => {
             if value == -1 {
-                cursor
-                    .seek(std::io::SeekFrom::Current((value as i64) + 3))
-                    .unwrap();
-                return Some(Value::Null);
+                cursor.seek(std::io::SeekFrom::Current((value as i64) + 3))?;
+                return Ok(Value::Null);
             }
             let position = cursor.position() as usize;
             let string_slice = &buffer[position..position + value as usize];
-            cursor
-                .seek(std::io::SeekFrom::Current((value as i64) + 2))
-                .unwrap();
-            from_utf8(string_slice).ok().map(|s| Value::String {
-                value: String::from(s),
+            cursor.seek(std::io::SeekFrom::Current((value as i64) + 2))?;
+            let str_value = from_utf8(string_slice)?;
+            Ok(Value::String {
+                value: String::from(str_value),
             })
         }
-        _ => None,
+        _ => Err(ParsingError::FormatError),
     }
 }
 
-fn parse_array(buffer: &[u8], cursor: &mut Cursor<&[u8]>) -> Option<Value> {
-    match parse_int(buffer, cursor) {
-        Some(Value::Int { value: 0 }) => Some(Value::Array { items: vec![] }),
-        Some(Value::Int { value }) => {
+fn parse_array(buffer: &[u8], cursor: &mut Cursor<&[u8]>) -> Result<Value, ParsingError> {
+    let array_length = parse_int(buffer, cursor)?;
+    match array_length {
+        Value::Int { value: 0 } => Ok(Value::Array { items: vec![] }),
+        Value::Int { value } => {
             let mut items: Vec<Value> = vec![];
             let mut item_count_left = value;
             while item_count_left > 0 {
                 item_count_left -= 1;
                 items.push(parse(buffer, cursor).unwrap());
             }
-            Some(Value::Array { items })
+            Ok(Value::Array { items })
         }
-        _ => None,
+        _ => Err(ParsingError::FormatError),
     }
 }
 
@@ -94,7 +106,7 @@ mod tests {
         let mut cursor = Cursor::new(input);
         cursor.seek(std::io::SeekFrom::Start(4)).unwrap();
         let result = parse_int(input, &mut cursor);
-        assert_eq!(result.is_some(), true);
+        assert_eq!(result.is_ok(), true);
         assert_eq!(result.unwrap(), Value::Int { value: 1 });
         assert_eq!(cursor.position(), 7);
     }
@@ -105,7 +117,7 @@ mod tests {
         let mut cursor = Cursor::new(input);
         cursor.seek(std::io::SeekFrom::Start(4)).unwrap();
         let result = parse_int(input, &mut cursor);
-        assert_eq!(result.is_some(), true);
+        assert_eq!(result.is_ok(), true);
         assert_eq!(result.unwrap(), Value::Int { value: 123 });
         assert_eq!(cursor.position(), 9);
     }
@@ -116,7 +128,7 @@ mod tests {
         let mut cursor = Cursor::new(input);
         cursor.seek(std::io::SeekFrom::Start(4)).unwrap();
         let result = parse(input, &mut cursor);
-        assert_eq!(result.is_some(), true);
+        assert_eq!(result.is_ok(), true);
         assert_eq!(result.unwrap(), Value::Int { value: 123 });
         assert_eq!(cursor.position(), 10);
     }
@@ -127,7 +139,7 @@ mod tests {
         let mut cursor = Cursor::new(input);
         cursor.seek(std::io::SeekFrom::Start(4)).unwrap();
         let result = parse(input, &mut cursor);
-        assert_eq!(result.is_some(), true);
+        assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.unwrap(),
             Value::String {
@@ -142,7 +154,7 @@ mod tests {
         let mut cursor = Cursor::new(input);
         cursor.seek(std::io::SeekFrom::Start(4)).unwrap();
         let result = parse(input, &mut cursor);
-        assert_eq!(result.is_some(), true);
+        assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.unwrap(),
             Value::String {
@@ -158,7 +170,7 @@ mod tests {
         let mut cursor = Cursor::new(input);
         cursor.seek(std::io::SeekFrom::Start(4)).unwrap();
         let result = parse(input, &mut cursor);
-        assert_eq!(result.is_some(), true);
+        assert_eq!(result.is_ok(), true);
         assert_eq!(result.unwrap(), Value::Null);
         assert_eq!(cursor.position(), 11);
         assert_eq!(input[cursor.position() as usize], b'O');
@@ -170,7 +182,7 @@ mod tests {
         let mut cursor = Cursor::new(input);
         cursor.seek(std::io::SeekFrom::Start(4)).unwrap();
         let result = parse(input, &mut cursor);
-        assert_eq!(result.is_some(), true);
+        assert_eq!(result.is_ok(), true);
         assert_eq!(result.unwrap(), Value::Array { items: vec![] });
         assert_eq!(cursor.position(), 8);
     }
@@ -181,7 +193,7 @@ mod tests {
         let mut cursor = Cursor::new(input);
         cursor.seek(std::io::SeekFrom::Start(4)).unwrap();
         let result = parse(input, &mut cursor);
-        assert_eq!(result.is_some(), true);
+        assert_eq!(result.is_ok(), true);
         assert_eq!(
             result.unwrap(),
             Value::Array {

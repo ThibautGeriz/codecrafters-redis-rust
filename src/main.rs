@@ -7,7 +7,7 @@ const PONG: &[u8] = b"+PONG\r\n";
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Error> {
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:6379").await?;
     loop {
         let (mut stream, addr) = listener.accept().await?;
         eprintln!("accepted: {addr:?}");
@@ -28,16 +28,19 @@ async fn handle_connection(stream: &mut TcpStream) -> std::result::Result<(), Er
         }
         let command = get_command(&buf);
         match command {
-            Some(Command::Ping) => {
+            Ok(Command::Ping) => {
                 stream.write_all(PONG).await?;
             }
-            Some(Command::Echo { print }) => {
+            Ok(Command::Echo { print }) => {
                 stream
                     .write_all(format!("+{}\r\n", print).as_bytes())
                     .await?;
             }
-            _ => {
-                stream.write_all(b"-Unknow command\r\n").await?;
+            Ok(Command::Unknown) => {
+                stream.write_all(b"-Unknown command\r\n").await?;
+            }
+            Err(_) => {
+                stream.write_all(b"-Unknown error\r\n").await?;
             }
         }
     }
