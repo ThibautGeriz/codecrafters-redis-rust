@@ -1,9 +1,7 @@
-use redis_starter_rust::{get_command, Command};
+use redis_starter_rust::{get_command, AsyncWriter, Command};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, Error};
+use tokio::io::{AsyncReadExt, Error};
 use tokio::net::{TcpListener, TcpStream};
-
-const PONG: &[u8] = b"+PONG\r\n";
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Error> {
@@ -27,26 +25,29 @@ async fn handle_connection(stream: &mut TcpStream) -> std::result::Result<(), Er
             break;
         }
         let command = get_command(&buf);
+        let mut writer = AsyncWriter::new(stream);
         match command {
             Ok(Command::Ping) => {
-                stream.write_all(PONG).await?;
+                writer.write_simple_string(String::from("PONG")).await?;
             }
             Ok(Command::Echo { print }) => {
-                stream
-                    .write_all(format!("+{}\r\n", print).as_bytes())
-                    .await?;
+                writer.write_simple_string(print).await?;
             }
             Ok(Command::Get { key: _ }) => {
-                stream.write_all(b"-not yet implemented\r\n").await?;
+                writer
+                    .write_error(String::from("not yet implemented"))
+                    .await?;
             }
             Ok(Command::Set { key: _, value: _ }) => {
-                stream.write_all(b"-not yet implemented\r\n").await?;
+                writer
+                    .write_error(String::from("not yet implemented"))
+                    .await?;
             }
             Ok(Command::Unknown) => {
-                stream.write_all(b"-Unknown command\r\n").await?;
+                writer.write_error(String::from("Unknown command")).await?;
             }
             Err(_) => {
-                stream.write_all(b"-Unknown error\r\n").await?;
+                writer.write_error(String::from("Unknown error")).await?;
             }
         }
     }
