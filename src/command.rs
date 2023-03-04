@@ -1,5 +1,6 @@
 use std::io::Cursor;
 use std::io::Seek;
+use std::time::Duration;
 
 use crate::parser::parse;
 use crate::parser::parse_int;
@@ -9,9 +10,17 @@ use crate::parser::Value;
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Ping,
-    Echo { print: String },
-    Get { key: String },
-    Set { key: String, value: String },
+    Echo {
+        print: String,
+    },
+    Get {
+        key: String,
+    },
+    Set {
+        key: String,
+        value: String,
+        expiry: Option<Duration>,
+    },
     Unknown,
 }
 
@@ -60,9 +69,19 @@ pub fn get_command(buffer: &[u8]) -> Result<Command, ParsingError> {
             } else if value == &String::from("set") {
                 match (parsed_lines.get(1), parsed_lines.get(2)) {
                     (Some(Value::String { value: key }), Some(Value::String { value })) => {
+                        let mut expiry: Option<u64> = None;
+                        if Some(&Value::String {
+                            value: String::from("px"),
+                        }) == parsed_lines.get(3)
+                        {
+                            if let Some(Value::String { value: _expiry }) = parsed_lines.get(4) {
+                                expiry = _expiry.parse::<u64>().ok();
+                            }
+                        }
                         return Ok(Command::Set {
                             key: String::from(key),
                             value: String::from(value),
+                            expiry: expiry.map(Duration::from_millis),
                         });
                     }
                     _ => {
@@ -78,6 +97,8 @@ pub fn get_command(buffer: &[u8]) -> Result<Command, ParsingError> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use crate::command::{get_command, Command};
     #[test]
     fn parse_input_return_unknown_if_empty() {
@@ -128,7 +149,24 @@ mod tests {
             result.unwrap(),
             Command::Set {
                 key: String::from("titi"),
-                value: String::from("toto")
+                value: String::from("toto"),
+                expiry: None
+            }
+        );
+    }
+
+    #[test]
+    fn parse_input_return_set_with_expiry() {
+        let input =
+            "*5\r\n$3\r\nset\r\n$4\r\ntiti\r\n$4\r\ntoto\r\n$2\r\npx\r\n$4\r\n1234\r\n".as_bytes();
+        let result = get_command(input);
+        assert_eq!(result.is_ok(), true);
+        assert_eq!(
+            result.unwrap(),
+            Command::Set {
+                key: String::from("titi"),
+                value: String::from("toto"),
+                expiry: Some(Duration::from_millis(1234))
             }
         );
     }

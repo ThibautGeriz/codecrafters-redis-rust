@@ -55,9 +55,9 @@ async fn handle_connection(
                     }
                 }
             }
-            Ok(Command::Set { key, value }) => {
+            Ok(Command::Set { key, value, expiry }) => {
                 let mut store = sharable_store.lock().await;
-                (*store).set(key, value);
+                (*store).set(key, value, expiry);
                 writer.write_simple_string(&(String::from("OK"))).await?;
             }
             Ok(Command::Unknown) => {
