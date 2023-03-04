@@ -6,3 +6,6 @@ pub use command::Command;
 
 pub mod writer;
 pub use writer::AsyncWriter;
+
+pub mod store;
+pub use store::Store;
