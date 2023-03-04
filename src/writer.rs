@@ -10,7 +10,7 @@ impl<'a> AsyncWriter<'a> {
         Self { stream }
     }
 
-    pub async fn write_simple_string(&mut self, print: String) -> Result<(), Error> {
+    pub async fn write_simple_string(&mut self, print: &String) -> Result<(), Error> {
         self.stream
             .write_all(format!("+{}\r\n", print).as_bytes())
             .await?;
